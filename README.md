@@ -251,3 +251,270 @@ Last module loaded wins. If you have two modules or components named the same, y
 * Named functions help readability
 * Keep important code up top including interfaces
 * Inject consistently. Consider using ngAnnotate.
+
+# Controller Patterns
+
+## Role of a Controller
+
+Controllers are effectively constructors, as they provide us with a new instance of the Controller. 
+
+## Classic vs. New
+
+## Why Dots Matter
+
+* Dots provide clarity
+* Easier to reach the parent scope with $parent.$parent chaining
+* Remove unexpected behavior
+
+## Nesting
+
+Recommendation is to use Controller As syntax. Controller As syntax is essentially syntactic sugar to inject scope into the controller and provide encapsulation.
+
+## $scope
+
+Try to avoid using $scope.$watch and $scope.$broadcast in a controller.
+
+    angular
+      .module('app')
+      .controller('Avengers', Avengers);
+    
+    Avengers.$inject = ['dataservice', 'logger'];
+
+    function Avengers(dataservice, logger) {
+      var vm = this;
+      vm.avengers = [];
+      vm.title = 'Avengers';
+
+      activate();
+
+      function activate() {
+        return getAvengers().then(function() {
+          logger.info('Activated Avengers View');
+        });
+      }
+
+      function getAvengers() {
+        return dataservice.getAvengers().then(function(data) {
+          vm.avengers = data;
+          return vm.avengers;
+        });
+      }
+    }
+
+## Resolvers
+
+You can associate controllers to view using the `controller` and `controllerAs` property in a route config. Using the `resolve` property, to wire up a route resolver to perform activities you want to happen before you navigate to the route endpoint, such as prefetch data or create custom variables. You MUST use the `controller` and `controllerAs` properties in the route config when using `resolve`. Resolvers also work with promises. `resolveAlways` can be used to inject a resolver into all routes.
+
+## Testing
+
+When testing a controller using `controllerAs` syntax:
+
+    beforeEach(function() {
+      // ...
+      scope = $rootScope.$new(); // scope is a variable on the describe
+      controller = $controller('Avengers as vm', {
+        '$scope': scope
+      });
+    });
+
+## Controller Patterns
+
+* Controller As provides syntactical sugar
+* Dots help avoid pitfalls in bindings
+* Use $scope members wisely (consider a factory)
+* Capture 'this' to avoid context issues
+  * `var vm = this`
+* Define controller
+  * in a view using ng-controller
+  * in a route
+* Resolve functions in the routes work with both
+  * Resolve can be injected into Controller only when using ControllerAs
+
+# Annotations and Code Analysis
+
+## The Value of Task Automation
+
+* Improved quality
+* Deliver Faster
+* Repeatable / More Consistent
+
+Grunt - configuration over code (file based)
+Gulp - code over configuration (stream based)
+
+## ngAnnotate Tips
+
+Use the `/* @ngInject */` hint to help ngAnnotate find locations to inject.
+
+    // ngAnnotate won't be able to find functions that aren't referenced by Angular
+    /* @ngInject */
+    function foo1($scope) {}
+
+    // or function expressions
+    /* @ngInject */
+    var foo2 = function($scope) {}
+
+    // or object literals, like when we have a route resolver
+    foo3 = /* @ngInject */ {
+      controller: function($http) {},
+      resolve: {
+        data: function(thing) {}
+      }
+    }
+
+# Exception Handling
+
+Handling?
+
+* Logging
+* Reporting
+* Diagnostics
+* Notifying The User
+
+## Catching Angular Errors Using Decorators
+
+Decorating allows us to extend or override functionality in other services using `$delegate`
+
+    (function () {
+      'use strict';
+
+      angular
+        .module('blocks.exception')
+        .provider('exceptionConfig', exceptionConfigProvider)
+        .config(exceptionConfig);
+
+      function exceptionConfigProvider() {
+        this.config = {
+          // appErrorPrefix: ''
+        };
+
+        this.$get = function () {
+          return {
+            config: this.config
+          };
+        };
+      }
+
+      exceptionConfig.$inject = ['$provide'];
+
+      function exceptionConfig($provide) {
+        $provide.decorator('$exceptionHandler', extendExceptionHandler);
+      }
+
+      extendExceptionHandler.$inject = ['$delegate', 'exceptionConfig', 'logger'];
+
+      function extendExceptionHandler($delegate, exceptionConfig, logger) {
+        var appErrorPrefix = exceptionConfig.config.appErrorPrefix || '';
+        return function (exception, cause) {
+          $delegate(exception, cause);
+          var errorData = {exception: exception, cause: cause};
+          var msg = appErrorPrefix + exception.message;
+          logger.error(msg, errorData);
+        };
+      }
+    });
+
+## Handling Routing Exceptions
+
+    function handleRoutingErrors() {
+      // Route cancellation:
+      // On routing error, go to the dashboard.
+      // Provide an exit clause if it tries to do it twice.
+      $rootScope.$on('$routeChangeError',
+      function(event, current, previous, rejection) {
+        if (handlingRouteChangeError) {
+          return;
+        }
+        routeCounts.errors++;
+        handlingRouteChangeError = true;
+        var destination = (current && (current.title || current.name || current.loadedTemplateUrl)) ||
+          'unknown target';
+        var msg = 'Error routing to ' + destination + '. ' + (rejection.msg || '');
+        logger.warning(msg, [current]);
+        $location.path('/');
+        }
+      );
+    }
+
+## Handling Custom Exceptions with an Exception Catcher
+
+    // in exception.js
+
+    (function () {
+      'use strict';
+
+      angular
+        .module('blocks.exception')
+        .factory('exception', exception);
+
+      /* @ngInject */
+      function exception(logger) {
+        var service = {
+          catcher: catcher
+        };
+        return service;
+
+        function catcher(message) {
+          return function (reason) {
+            logger.error(message, reason);
+          };
+        }
+      }
+    })();
+
+    // in dataservice.js
+
+    (function () {
+      'use strict';
+
+      angular
+        .module('app.core')
+        .factory('dataservice', dataservice);
+
+      /* @ngInject */
+      function dataservice($http, $location, $q, exception, logger) {
+        var isPrimed = false;
+        var primePromise;
+
+        var service = {
+          getAvengersCast: getAvengersCast,
+          getAvengerCount: getAvengerCount,
+          getAvengers: getAvengers,
+          ready: ready
+        };
+
+        return service;
+
+        function getAvengers() {
+          return $http.get('/api/maa')
+            .then(getAvengersComplete)
+            .catch(function (message) {
+              exception.catcher('XHR Failed for getAvengers')(message);
+              $location.url('/');
+            });
+
+          function getAvengersComplete(data, status, headers, config) {
+            return data.data[0].data.results;
+          }
+        }
+
+        ...
+
+## Summary
+
+There's many ways an application can fail.
+
+* Track and Correct
+* Repeatable / Consistent Pattern
+* Have an exception handling strategy
+* Be consistent
+* Track and log the exception patterns
+* Graceful UX
+
+# Using a Team Style Guide
+
+Key Messages in a Style Guide
+
+* What to follow
+* Why your team chose it
+* How to implement it
+
